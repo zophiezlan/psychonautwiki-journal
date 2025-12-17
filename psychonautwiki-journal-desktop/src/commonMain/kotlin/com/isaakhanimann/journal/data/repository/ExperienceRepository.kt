@@ -57,7 +57,7 @@ class ExperienceRepositoryImpl(
                         creationDate = Instant.fromEpochSeconds(exp.creationDate),
                         sortDate = Instant.fromEpochSeconds(exp.sortDate),
                         isFavorite = exp.isFavorite == 1L,
-                        location = exp.locationName,
+                        location = exp.location,
                         date = Instant.fromEpochSeconds(exp.sortDate),
                         overallRating = exp.overallRating?.toInt(),
                         ingestions = null // Will be loaded separately when needed
@@ -79,7 +79,7 @@ class ExperienceRepositoryImpl(
                         creationDate = Instant.fromEpochSeconds(it.creationDate),
                         sortDate = Instant.fromEpochSeconds(it.sortDate),
                         isFavorite = it.isFavorite == 1L,
-                        location = it.locationName,
+                        location = it.location,
                         date = Instant.fromEpochSeconds(it.sortDate),
                         overallRating = it.overallRating?.toInt(),
                         ingestions = null // Will be loaded separately when needed
@@ -101,7 +101,7 @@ class ExperienceRepositoryImpl(
                         creationDate = Instant.fromEpochSeconds(exp.creationDate),
                         sortDate = Instant.fromEpochSeconds(exp.sortDate),
                         isFavorite = exp.isFavorite == 1L,
-                        location = exp.locationName,
+                        location = exp.location,
                         date = Instant.fromEpochSeconds(exp.sortDate),
                         overallRating = exp.overallRating?.toInt(),
                         ingestions = null // Will be loaded separately when needed
@@ -118,10 +118,8 @@ class ExperienceRepositoryImpl(
                 creationDate = experience.creationDate.epochSeconds,
                 sortDate = experience.sortDate.epochSeconds,
                 isFavorite = if (experience.isFavorite) 1L else 0L,
-                overallRating = experience.overallRating?.toLong(),
-                locationName = experience.location,
-                locationLongitude = null,
-                locationLatitude = null
+                location = experience.location,
+                overallRating = experience.overallRating?.toLong()
             )
             queries.lastInsertRowId().executeAsOne()
         }
@@ -132,10 +130,8 @@ class ExperienceRepositoryImpl(
             title = experience.title,
             text = experience.text,
             isFavorite = if (experience.isFavorite) 1L else 0L,
+            location = experience.location,
             overallRating = experience.overallRating?.toLong(),
-            locationName = experience.location,
-            locationLongitude = null,
-            locationLatitude = null,
             id = experience.id.toLong()
         )
     }
@@ -362,7 +358,7 @@ class ExperienceRepositoryImpl(
                         creationDate = Instant.fromEpochSeconds(exp.creationDate),
                         sortDate = Instant.fromEpochSeconds(exp.sortDate),
                         isFavorite = exp.isFavorite == 1L,
-                        location = exp.locationName,
+                        location = exp.location,
                         date = Instant.fromEpochSeconds(exp.sortDate),
                         overallRating = exp.overallRating?.toInt(),
                         ingestions = null // Will be loaded separately when needed

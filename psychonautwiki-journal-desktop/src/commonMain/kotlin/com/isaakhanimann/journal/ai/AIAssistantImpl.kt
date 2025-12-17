@@ -69,7 +69,7 @@ class AIAssistantImpl : AIAssistant, KoinComponent {
     private val _isProcessing = MutableStateFlow(false)
     override val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
     
-    private val aiProvider: AIProvider = LocalAIProvider()
+    private val aiProvider: AIProvider = LucyProvider()
     
     init {
         scope.launch {
