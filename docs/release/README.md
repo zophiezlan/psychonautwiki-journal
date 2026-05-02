@@ -5,11 +5,11 @@ flow in [`/RELEASE.md`](../../RELEASE.md) first — it covers checksums, the
 detached PGP signature, and reproducibility verification that span all three
 platforms.
 
-| Platform | Doc | Output |
-|----------|-----|--------|
-| Windows  | [RELEASE-WINDOWS.md](RELEASE-WINDOWS.md) | signed `.msi` |
+| Platform | Doc                                      | Output                              |
+| -------- | ---------------------------------------- | ----------------------------------- |
+| Windows  | [RELEASE-WINDOWS.md](RELEASE-WINDOWS.md) | signed `.msi`                       |
 | macOS    | [RELEASE-MACOS.md](RELEASE-MACOS.md)     | signed + notarized + stapled `.dmg` |
-| Linux    | [RELEASE-LINUX.md](RELEASE-LINUX.md)     | signed `.deb`, signed `.AppImage` |
+| Linux    | [RELEASE-LINUX.md](RELEASE-LINUX.md)     | signed `.deb`, signed `.AppImage`   |
 
 Each doc follows the same eight-or-nine-section template:
 

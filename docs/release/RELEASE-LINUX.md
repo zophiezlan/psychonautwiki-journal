@@ -18,14 +18,14 @@ manager. It does not replace the top-level checksum signing.
 
 ### Tooling
 
-| Tool | Why | Where to get it |
-|------|-----|-----------------|
-| Linux build host | Ideally the same one that builds the Nix flake — guarantees the binary matches the reproducibility check in `RELEASE.md` § 4. | n/a |
-| JDK 17 | Same JDK the project targets. | Ships in the Nix dev shell. |
-| `dpkg-sig` | Embeds a GPG signature in the `.deb`. | `apt install dpkg-sig` (Debian/Ubuntu) or `nix shell nixpkgs#dpkg-sig`. |
-| `appimagetool` | Re-packs and signs the AppImage. | <https://github.com/AppImage/AppImageKit/releases> — use the `--sign` flag. |
-| `gpg` 2.2+ | Signing key infrastructure. Required by both `dpkg-sig` and `appimagetool`. | already in any reasonable distro |
-| `sha256sum` | Cross-platform checksum (covered in `RELEASE.md`). | coreutils |
+| Tool             | Why                                                                                                                           | Where to get it                                                             |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Linux build host | Ideally the same one that builds the Nix flake — guarantees the binary matches the reproducibility check in `RELEASE.md` § 4. | n/a                                                                         |
+| JDK 17           | Same JDK the project targets.                                                                                                 | Ships in the Nix dev shell.                                                 |
+| `dpkg-sig`       | Embeds a GPG signature in the `.deb`.                                                                                         | `apt install dpkg-sig` (Debian/Ubuntu) or `nix shell nixpkgs#dpkg-sig`.     |
+| `appimagetool`   | Re-packs and signs the AppImage.                                                                                              | <https://github.com/AppImage/AppImageKit/releases> — use the `--sign` flag. |
+| `gpg` 2.2+       | Signing key infrastructure. Required by both `dpkg-sig` and `appimagetool`.                                                   | already in any reasonable distro                                            |
+| `sha256sum`      | Cross-platform checksum (covered in `RELEASE.md`).                                                                            | coreutils                                                                   |
 
 ### 0.1 GPG signing key
 
@@ -361,8 +361,8 @@ Skeleton (do not enable until secrets are provisioned):
 ```yaml
 - name: Import GPG signing key
   env:
-    GPG_PRIVATE_KEY:        ${{ secrets.GPG_PRIVATE_KEY_BASE64 }}
-    GPG_PASSPHRASE:         ${{ secrets.GPG_PASSPHRASE }}
+    GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY_BASE64 }}
+    GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
   run: |
     echo "$GPG_PRIVATE_KEY" | base64 --decode | gpg --batch --import
     echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf

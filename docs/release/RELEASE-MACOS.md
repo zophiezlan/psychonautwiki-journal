@@ -17,12 +17,12 @@ post-build invocation — but you still need to verify and staple yourself.
 
 ### Tooling
 
-| Tool | Why | Where to get it |
-|------|-----|-----------------|
-| macOS 13+ build host | `notarytool` requires recent macOS; older notarization paths via `altool` were retired by Apple in late 2023. | n/a |
-| Xcode 14+ Command Line Tools | Provides `codesign`, `notarytool`, `stapler`, `spctl`. | `xcode-select --install` |
-| JDK 17 | Same JDK the project targets. Match `arch` to the build target — building a Universal binary requires the JDK to be Universal too. | Eclipse Temurin 17 (`brew install --cask temurin@17`), or use the Nix dev shell. |
-| Gradle wrapper | `./gradlew` in-tree. | already vendored |
+| Tool                         | Why                                                                                                                                | Where to get it                                                                  |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| macOS 13+ build host         | `notarytool` requires recent macOS; older notarization paths via `altool` were retired by Apple in late 2023.                      | n/a                                                                              |
+| Xcode 14+ Command Line Tools | Provides `codesign`, `notarytool`, `stapler`, `spctl`.                                                                             | `xcode-select --install`                                                         |
+| JDK 17                       | Same JDK the project targets. Match `arch` to the build target — building a Universal binary requires the JDK to be Universal too. | Eclipse Temurin 17 (`brew install --cask temurin@17`), or use the Nix dev shell. |
+| Gradle wrapper               | `./gradlew` in-tree.                                                                                                               | already vendored                                                                 |
 
 ### 0.1 Apple Developer account + cert
 
@@ -311,9 +311,9 @@ Skeleton (do not enable until secrets are provisioned):
 ```yaml
 - name: Import signing certificate
   env:
-    P12_BASE64:    ${{ secrets.MACOS_CERTIFICATE_P12 }}
-    P12_PASSWORD:  ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-    KC_PASSWORD:   ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+    P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+    P12_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+    KC_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
   run: |
     echo "$P12_BASE64" | base64 --decode > certificate.p12
     security create-keychain -p "$KC_PASSWORD" build.keychain
@@ -327,10 +327,10 @@ Skeleton (do not enable until secrets are provisioned):
 
 - name: Build, sign, notarize
   env:
-    APPLE_DEVELOPER_ID:           ${{ secrets.APPLE_DEVELOPER_ID }}
-    APPLE_ID:                     ${{ secrets.APPLE_ID }}
-    APPLE_TEAM_ID:                ${{ secrets.APPLE_TEAM_ID }}
-    APPLE_APP_SPECIFIC_PASSWORD:  ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+    APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
+    APPLE_ID: ${{ secrets.APPLE_ID }}
+    APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
   run: |
     cd psychonautwiki-journal-desktop
     ./gradlew packageReleaseDmg --no-daemon

@@ -11,14 +11,14 @@ document only covers the Windows-specific build, sign, and verify steps.
 
 ### Tooling
 
-| Tool | Why | Where to get it |
-|------|-----|-----------------|
-| Windows 10/11 build host | Compose Multiplatform's `packageReleaseMsi` only emits an MSI when run on Windows, because it shells out to WiX. | n/a |
-| JDK 17+ | Same JDK the project targets. | Use the Nix dev shell on WSL2, or install Eclipse Temurin 17 directly. |
-| Gradle wrapper | `./gradlew.bat` is in-tree; do NOT use a globally installed Gradle. | already vendored |
-| WiX Toolset 3 | Compose's MSI packager invokes WiX. | Prefer `wix314-binaries.zip` from the WiX v3.14.1 release and add its folder to `%PATH%`. The `winget install WiXToolset.WiX` installer can work too, but some Windows hosts block it on the legacy `.NET Framework 3.5` prerequisite. v4 is **not** supported by the current Compose plugin. |
-| Windows SDK (`signtool.exe`) | Authenticode signing + verification. | `winget install Microsoft.WindowsSDK.10.0.22621` (or whichever SDK matches your Windows build). Confirm `signtool.exe` is on `%PATH%`. |
-| Your code-signing certificate | Authenticode signature. | See § 0.1. |
+| Tool                          | Why                                                                                                              | Where to get it                                                                                                                                                                                                                                                                               |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows 10/11 build host      | Compose Multiplatform's `packageReleaseMsi` only emits an MSI when run on Windows, because it shells out to WiX. | n/a                                                                                                                                                                                                                                                                                           |
+| JDK 17+                       | Same JDK the project targets.                                                                                    | Use the Nix dev shell on WSL2, or install Eclipse Temurin 17 directly.                                                                                                                                                                                                                        |
+| Gradle wrapper                | `./gradlew.bat` is in-tree; do NOT use a globally installed Gradle.                                              | already vendored                                                                                                                                                                                                                                                                              |
+| WiX Toolset 3                 | Compose's MSI packager invokes WiX.                                                                              | Prefer `wix314-binaries.zip` from the WiX v3.14.1 release and add its folder to `%PATH%`. The `winget install WiXToolset.WiX` installer can work too, but some Windows hosts block it on the legacy `.NET Framework 3.5` prerequisite. v4 is **not** supported by the current Compose plugin. |
+| Windows SDK (`signtool.exe`)  | Authenticode signing + verification.                                                                             | `winget install Microsoft.WindowsSDK.10.0.22621` (or whichever SDK matches your Windows build). Confirm `signtool.exe` is on `%PATH%`.                                                                                                                                                        |
+| Your code-signing certificate | Authenticode signature.                                                                                          | See § 0.1.                                                                                                                                                                                                                                                                                    |
 
 ### 0.0 WiX setup when the installer fails on `.NET Framework 3.5`
 
@@ -38,7 +38,7 @@ Expand-Archive .\wix314-binaries.zip -DestinationPath C:\Tools\wix314 -Force
 $env:PATH = "C:\Tools\wix314;$env:PATH"
 ```
 
-3. Confirm the tools are visible:
+1. Confirm the tools are visible:
 
 ```powershell
 candle.exe -?
@@ -186,14 +186,14 @@ signtool sign `
 
 Flag-by-flag justification (do not omit any):
 
-| Flag | What it does | Why mandatory |
-|------|--------------|---------------|
-| `/tr` | RFC 3161 timestamp URL | Without a timestamp, the signature expires when the cert expires (typically 1–3 years), and every install after that triggers a "this software is from an unverified publisher" warning. The timestamp pins the signature's validity to the moment of signing, which a CA-backed timestamp authority attests to — so the signature stays valid for the cert's full revocation horizon (~10 years for the timestamp itself). |
-| `/td sha256` | Timestamp digest algorithm | SHA-1 is deprecated; Windows 10+ SmartScreen will not honour SHA-1 timestamps. |
-| `/fd sha256` | File digest algorithm | Same — SHA-1 file digests are no longer accepted. |
-| `/a` | Auto-select best cert from the available stores | With an EV token, this picks the token's cert. Without `/a` you'd need `/n "Common Name"` or `/sha1 <thumbprint>`. |
-| `/d` | Description shown in the UAC prompt | This is what the user sees. Spelled out, no abbreviations. |
-| `/du` | URL shown in the UAC prompt's "More info" link | Lets users verify the publisher independently. |
+| Flag         | What it does                                    | Why mandatory                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------ | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/tr`        | RFC 3161 timestamp URL                          | Without a timestamp, the signature expires when the cert expires (typically 1–3 years), and every install after that triggers a "this software is from an unverified publisher" warning. The timestamp pins the signature's validity to the moment of signing, which a CA-backed timestamp authority attests to — so the signature stays valid for the cert's full revocation horizon (~10 years for the timestamp itself). |
+| `/td sha256` | Timestamp digest algorithm                      | SHA-1 is deprecated; Windows 10+ SmartScreen will not honour SHA-1 timestamps.                                                                                                                                                                                                                                                                                                                                              |
+| `/fd sha256` | File digest algorithm                           | Same — SHA-1 file digests are no longer accepted.                                                                                                                                                                                                                                                                                                                                                                           |
+| `/a`         | Auto-select best cert from the available stores | With an EV token, this picks the token's cert. Without `/a` you'd need `/n "Common Name"` or `/sha1 <thumbprint>`.                                                                                                                                                                                                                                                                                                          |
+| `/d`         | Description shown in the UAC prompt             | This is what the user sees. Spelled out, no abbreviations.                                                                                                                                                                                                                                                                                                                                                                  |
+| `/du`        | URL shown in the UAC prompt's "More info" link  | Lets users verify the publisher independently.                                                                                                                                                                                                                                                                                                                                                                              |
 
 ### 3.2 With a PFX file (OV cert)
 
@@ -277,6 +277,53 @@ release if you're on an OV cert. They turn around in 1–3 business days.
 ---
 
 ## 7. Common failure modes
+
+### `packageReleaseMsi` fails with `Unable to delete directory '...\build\compose\binaries\main-release\msi'`
+
+Some other process holds an open handle on a file in that directory, so
+gradle's pre-task `clean` cannot unlink it. Order of fixes, cheapest first:
+
+1. **Close the obvious holders.** Stop any leftover gradle daemons, kill the
+   app if a prior smoke-test launched it, and close any Explorer window
+   showing the `msi\` directory (Explorer's preview pane keeps file handles
+   open even when nothing is visibly highlighted):
+
+   ```powershell
+   .\gradlew.bat --stop
+   taskkill /IM "PsychonautWiki Journal.exe" /F  2>$null
+   taskkill /IM "psychonautwiki-journal.exe"  /F  2>$null
+   ```
+
+   Then re-run `.\gradlew.bat clean packageReleaseMsi --no-daemon`.
+
+2. **Find the actual holder.** Install Sysinternals' `handle.exe`
+   (`winget install Microsoft.Sysinternals.Handle`) and ask:
+
+   ```powershell
+   handle.exe -nobanner `
+     "C:\…\psychonautwiki-journal-desktop\build\compose\binaries\main-release"
+   ```
+
+   Likely culprits: `msiexec.exe` (orphaned from an earlier `msiexec /i`
+   smoke install), the `MsiServer` Windows service, `SearchIndexer.exe`,
+   `MsMpEng.exe` (Defender real-time scanning the freshly-emitted MSI),
+   or `explorer.exe`. Defender's lock typically lifts within ~10 seconds —
+   for that one, just wait and retry rather than killing the process.
+
+3. **Nuke the build directory.** When nothing else works:
+
+   ```powershell
+   Remove-Item -Recurse -Force psychonautwiki-journal-desktop\build
+   .\gradlew.bat clean packageReleaseMsi --no-daemon
+   ```
+
+   The Compose / WiX inputs are cached upstream of this directory, so the
+   re-run is short.
+
+If you hit this on a recurring basis on the same machine, exclude the build
+output directory from Defender real-time scanning (Settings → Virus &
+threat protection → Manage settings → Add or remove exclusions). Don't
+exclude the source tree — only the per-build output path.
 
 ### "The specified PFX password is not correct"
 
