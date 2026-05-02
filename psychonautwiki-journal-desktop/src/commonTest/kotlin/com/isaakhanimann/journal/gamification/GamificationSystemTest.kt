@@ -182,7 +182,7 @@ class GamificationSystemTest : StringSpec({
             )
         )
         
-        challenge.endDate.epochSeconds shouldBeGreaterThan challenge.startDate.epochSeconds
+        challenge.endDate.epochSeconds.toDouble() shouldBeGreaterThan challenge.startDate.epochSeconds.toDouble()
         challenge.requirements.first().type shouldBe RequirementType.SAFETY_PRACTICES_USED
     }
     

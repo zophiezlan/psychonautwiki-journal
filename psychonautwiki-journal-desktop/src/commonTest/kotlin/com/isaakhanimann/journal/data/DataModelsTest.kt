@@ -41,9 +41,9 @@ class DataModelsTest : StringSpec({
         alcohol shouldNotBe null
         alcohol?.name shouldBe "Alcohol"
         
-        val ethanol = PsychonautWikiDatabase.getSubstanceByName("Ethanol")
-        ethanol shouldNotBe null
-        ethanol?.name shouldBe "Alcohol" // Should find by common name
+        val booze = PsychonautWikiDatabase.getSubstanceByName("Booze")
+        booze shouldNotBe null
+        booze?.name shouldBe "Alcohol" // Should find by common name
     }
     
     "PsychonautWikiDatabase should search substances" {

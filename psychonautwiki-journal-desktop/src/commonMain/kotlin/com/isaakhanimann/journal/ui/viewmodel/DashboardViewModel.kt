@@ -82,7 +82,7 @@ data class DashboardUiState(
     val error: String? = null
 ) {
     val isSuccess: Boolean get() = data != null && error == null
-    val isEmpty: Boolean get() = data?.totalExperiences == 0
+    val isEmpty: Boolean get() = data == null || data.totalExperiences == 0
 }
 
 data class DashboardData(

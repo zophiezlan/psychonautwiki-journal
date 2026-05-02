@@ -92,16 +92,16 @@ class AIAssistantTest : StringSpec({
         conversation.messages[1].role shouldBe MessageRole.ASSISTANT
     }
     
-    "LocalAIProvider should have correct capabilities" {
-        val provider = LocalAIProvider()
+    "LucyProvider should have correct capabilities" {
+        val provider = LucyProvider()
         
-        provider.name shouldBe "Local AI Assistant"
+        provider.name shouldBe "Lucy - Joke Assistant"
         provider.description.shouldNotBeBlank()
-        provider.capabilities.canAnalyzeExperiences shouldBe true
-        provider.capabilities.canProvideRecommendations shouldBe true
-        provider.capabilities.canAnswerQuestions shouldBe true
-        provider.capabilities.canGenerateInsights shouldBe true
-        provider.capabilities.canProcessNaturalLanguage shouldBe true
+        provider.capabilities.canAnalyzeExperiences shouldBe false
+        provider.capabilities.canProvideRecommendations shouldBe false
+        provider.capabilities.canAnswerQuestions shouldBe false
+        provider.capabilities.canGenerateInsights shouldBe false
+        provider.capabilities.canProcessNaturalLanguage shouldBe false
         provider.capabilities.supportedLanguages shouldContain "en"
     }
     
