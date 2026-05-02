@@ -51,5 +51,4 @@ jobs:
     - name: Verify substance database loading
       run: |
         cd psychonautwiki-journal-desktop
-        nix develop -c -- gradle build --info | tee build.log
-        grep -E "(substance|Loaded|database)" build.log
+        nix develop -c -- gradle desktopTest --tests "*SubstanceDatabaseLoadingTest*" --info
