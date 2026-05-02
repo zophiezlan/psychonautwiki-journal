@@ -115,22 +115,28 @@ class SmartPatternRecognitionPlugin : Plugin {
             }
         }
         
-        // Check for known dangerous interactions
-        val knownDangerousCombinations = setOf(
-            setOf("MDMA", "MAOIs"),
-            setOf("Cocaine", "Alcohol"),
-            setOf("Tramadol", "MDMA"),
-            setOf("Lithium", "LSD"),
-            setOf("Lithium", "Psilocybin")
-        )
-        
+        // Check for known dangerous interactions.
+        //
+        // SAFETY: this lookup is curated and intentionally conservative. The
+        // canonical source of truth for substance interactions is the
+        // PsychonautWiki database (Substance.interactions on the AnalyticsContext
+        // payload, or SubstanceInfo.interactions.dangerous from SubstanceLoader).
+        // When that data is wired through, prefer it; this hard-coded table is a
+        // fallback for categories that PW exposes as a class (e.g. "MAOIs")
+        // rather than per-substance edges.
+        //
+        // Matching rules:
+        //  - names are compared case-insensitively but EXACTLY (no substring),
+        //    so "Cocaethylene" does not falsely match "Cocaine";
+        //  - a combination warns only when EVERY arm is matched by some
+        //    substance in the experience, not just one arm.
         combinationMap.keys.forEach { substances ->
-            knownDangerousCombinations.forEach { dangerous ->
-                if (substances.any { sub -> dangerous.any { d -> sub.contains(d, ignoreCase = true) } }) {
+            DANGEROUS_COMBINATIONS.forEach { combo ->
+                if (combo.matches(substances)) {
                     insights.add(Insight(
                         id = "known-dangerous-${substances.joinToString("-")}",
-                        title = "Known Dangerous Interaction",
-                        description = "This combination contains substances known to have dangerous interactions",
+                        title = "Known Dangerous Interaction: ${combo.label}",
+                        description = combo.description,
                         confidence = 0.95,
                         severity = InsightSeverity.CRITICAL
                     ))
@@ -387,13 +393,7 @@ class SmartPatternRecognitionPlugin : Plugin {
         substanceIntervals.forEach { (substance, intervals) ->
             if (intervals.size >= 3) {
                 val avgInterval = intervals.average()
-                val minSafeInterval = when {
-                    substance.contains("LSD", ignoreCase = true) -> 14
-                    substance.contains("Psilocybin", ignoreCase = true) -> 14
-                    substance.contains("MDMA", ignoreCase = true) -> 90
-                    substance.contains("DMT", ignoreCase = true) -> 1
-                    else -> 7
-                }
+                val minSafeInterval = MIN_SAFE_INTERVALS_DAYS[substance.trim().lowercase()] ?: 7
                 
                 if (avgInterval < minSafeInterval) {
                     insights.add(Insight(
@@ -564,6 +564,90 @@ class SmartPatternRecognitionPlugin : Plugin {
         )
     }
     
+    /**
+     * Two arms (each itself a set of canonical names) define a dangerous combination.
+     * A logged experience triggers the warning iff at least one substance in the
+     * experience matches arm A AND at least one matches arm B (case-insensitive
+     * exact-name match — never substring).
+     */
+    private data class DangerousCombo(
+        val label: String,
+        val description: String,
+        val armA: Set<String>,
+        val armB: Set<String>
+    ) {
+        fun matches(substancesInExperience: Set<String>): Boolean {
+            val taken = substancesInExperience.map { it.trim().lowercase() }.toSet()
+            val a = armA.any { it.lowercase() in taken }
+            val b = armB.any { it.lowercase() in taken }
+            return a && b
+        }
+    }
+
+    companion object {
+        // MAOIs the PsychonautWiki database surfaces as separate substances.
+        // This list is incomplete on purpose — it covers the common cases and
+        // should be replaced with `SubstanceInfo.categories.contains("MAOI")`
+        // matching once the substance library is wired into the analytics
+        // context. The conservative fallback is acceptable: false negatives
+        // here are caught by the "negative experience trend" heuristic above.
+        private val MAOIS = setOf(
+            "Phenelzine", "Tranylcypromine", "Selegiline", "Moclobemide",
+            "Isocarboxazid", "Harmaline", "Harmine",
+            "Syrian rue", "Peganum harmala", "Banisteriopsis caapi", "Ayahuasca"
+        )
+
+        private val DANGEROUS_COMBINATIONS = listOf(
+            DangerousCombo(
+                label = "MDMA + MAOI",
+                description = "MAOIs combined with MDMA can trigger life-threatening serotonin syndrome and hypertensive crisis.",
+                armA = setOf("MDMA"),
+                armB = MAOIS
+            ),
+            DangerousCombo(
+                label = "Cocaine + Alcohol",
+                description = "Cocaine and alcohol combine in the liver to form cocaethylene, a more cardiotoxic metabolite associated with sudden cardiac death.",
+                armA = setOf("Cocaine"),
+                armB = setOf("Alcohol", "Ethanol")
+            ),
+            DangerousCombo(
+                label = "Tramadol + MDMA",
+                description = "Both elevate serotonin and lower the seizure threshold; combined use risks serotonin syndrome and seizures.",
+                armA = setOf("Tramadol"),
+                armB = setOf("MDMA")
+            ),
+            DangerousCombo(
+                label = "Tramadol + serotonergic psychedelic",
+                description = "Tramadol combined with serotonergic psychedelics or MDMA risks serotonin syndrome and seizures.",
+                armA = setOf("Tramadol"),
+                armB = setOf("LSD", "Psilocybin", "Psilocin", "DMT", "5-MeO-DMT", "2C-B")
+            ),
+            DangerousCombo(
+                label = "Lithium + serotonergic psychedelic",
+                description = "Lithium combined with classical serotonergic psychedelics has been associated with seizures and is widely contraindicated.",
+                armA = setOf("Lithium"),
+                armB = setOf("LSD", "Psilocybin", "Psilocin", "DMT", "5-MeO-DMT", "2C-B", "Mescaline", "MDMA")
+            )
+        )
+
+        // Minimum recommended interval (days) between repeated doses of the
+        // same substance, keyed by canonical lowercase name. Match is exact:
+        // a logged "LSD" hits the 14-day rule, "1P-LSD" or "ALD-52" do not
+        // (they should be added explicitly when their own pharmacology is
+        // distinct enough to warrant a different cadence).
+        internal val MIN_SAFE_INTERVALS_DAYS: Map<String, Int> = mapOf(
+            "lsd" to 14,
+            "psilocybin" to 14,
+            "psilocin" to 14,
+            "mdma" to 90,
+            "dmt" to 1,
+            "5-meo-dmt" to 7,
+            "2c-b" to 7,
+            "ketamine" to 7,
+            "mescaline" to 14
+        )
+    }
+
     private fun calculateCorrelation(x: List<Double>, y: List<Double>): Double {
         if (x.size != y.size || x.isEmpty()) return 0.0
         

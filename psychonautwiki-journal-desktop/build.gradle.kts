@@ -84,13 +84,13 @@ kotlin {
 compose.desktop {
     application {
         mainClass = "com.isaakhanimann.journal.desktop.MainKt"
-        
+
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb, TargetFormat.AppImage)
             packageName = "PsychonautWiki Journal"
             packageVersion = "1.0.0"
             description = "A safer way to track substance experiences"
-            
+
             linux {
                 iconFile.set(project.file("src/desktopMain/resources/icon.png"))
                 packageName = "psychonautwiki-journal"
@@ -98,8 +98,44 @@ compose.desktop {
                 menuGroup = "Utilities"
                 appCategory = "Utility"
             }
+
+            // -----------------------------------------------------------------
+            // SIGNING — driven by environment variables so secrets never enter
+            // version control. Builds without these env vars produce UNSIGNED
+            // artefacts and SHOULD NOT be distributed to end users; see
+            // RELEASE.md for the full release procedure including SHA-256
+            // checksums and detached PGP signatures of the installer files.
+            // -----------------------------------------------------------------
+            macOS {
+                // Required: APPLE_DEVELOPER_ID, e.g. "Developer ID Application: Foo (TEAMID)"
+                val appleSigningIdentity: String? = System.getenv("APPLE_DEVELOPER_ID")
+                if (!appleSigningIdentity.isNullOrBlank()) {
+                    signing {
+                        sign.set(true)
+                        identity.set(appleSigningIdentity)
+                    }
+                    // Required for notarization: APPLE_ID, APPLE_TEAM_ID, APPLE_APP_SPECIFIC_PASSWORD
+                    val appleId = System.getenv("APPLE_ID")
+                    val appleTeamId = System.getenv("APPLE_TEAM_ID")
+                    val applePassword = System.getenv("APPLE_APP_SPECIFIC_PASSWORD")
+                    if (!appleId.isNullOrBlank() && !appleTeamId.isNullOrBlank() && !applePassword.isNullOrBlank()) {
+                        notarization {
+                            appleID.set(appleId)
+                            teamID.set(appleTeamId)
+                            password.set(applePassword)
+                        }
+                    }
+                }
+            }
+            windows {
+                // Optional: msiPackageVersion, productVersion etc. live here.
+                // Authenticode signing of the resulting .msi is currently performed
+                // post-build via signtool — see RELEASE.md. Once the Compose
+                // Multiplatform plugin exposes a Windows signing block, wire it
+                // up here using WIN_SIGN_PFX_PATH / WIN_SIGN_PFX_PASSWORD env vars.
+            }
         }
-        
+
         buildTypes.release.proguard {
             configurationFiles.from("proguard-rules.pro")
         }

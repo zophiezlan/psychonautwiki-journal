@@ -30,10 +30,13 @@ jobs:
     
     - name: Run tests
       run: |
-        cd psychonautwiki-journal-desktop  
-        nix develop -c -- gradle test || echo "Tests completed with expected failures (test dependencies)"
-    
+        cd psychonautwiki-journal-desktop
+        nix develop -c -- gradle test
+    # Test failures must fail the build. If you need to skip a flaky test,
+    # mark it `@Disabled` with a reason — do not paper over it in CI.
+
     - name: Verify substance database loading
       run: |
         cd psychonautwiki-journal-desktop
-        nix develop -c -- gradle build --info | grep -E "(substance|Loaded|database)" || echo "Build completed successfully"
+        nix develop -c -- gradle build --info | tee build.log
+        grep -E "(substance|Loaded|database)" build.log

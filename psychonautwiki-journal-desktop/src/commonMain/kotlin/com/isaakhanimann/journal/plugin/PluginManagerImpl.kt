@@ -13,41 +13,82 @@ import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import java.io.File
 import java.net.URLClassLoader
+import java.nio.file.Files
+import java.nio.file.attribute.PosixFilePermissions
 import java.util.jar.JarFile
 import kotlin.reflect.KClass
 
+/**
+ * Plugin loader.
+ *
+ * SECURITY MODEL (current state — read before changing):
+ *
+ * Plugin code is loaded with [URLClassLoader] and runs with the full privileges of the
+ * host JVM (filesystem, network, reflection). The [Permission] enum on [PluginManifest]
+ * is informational only — there is no enforcement layer yet. Until one exists, this
+ * class deliberately:
+ *
+ *  - does NOT auto-load plugins on application startup, even if the user previously
+ *    enabled them. Users must re-confirm load each session;
+ *  - rejects any plugin whose manifest declares privileged permissions
+ *    ([Permission.NETWORK_ACCESS], [Permission.FILE_SYSTEM_ACCESS], [Permission.BIOMETRIC_DATA]);
+ *  - canonicalises [manifest.id] and refuses path-traversal characters so the id
+ *    cannot escape [getPluginDirectory] when used as a filename;
+ *  - canonicalises any path passed to [loadPlugin] and refuses paths outside
+ *    the plugin directory, regardless of symlink targets;
+ *  - does NOT auto-load a freshly installed plugin from [installPlugin] — the user
+ *    must invoke [enablePlugin] / [loadPlugin] explicitly.
+ *
+ * To remove these restrictions, you MUST first wire up real enforcement:
+ *  1. A custom [SecurityManager] (or post-JEP-411 equivalent) gating the JDK calls
+ *     a plugin can make to those declared in its manifest.
+ *  2. A [ClassLoader] that constrains the classes a plugin can resolve from the
+ *     host (whitelist approach, not blacklist).
+ *  3. Code-signing verification on the JAR before [URLClassLoader] sees it.
+ *  4. Replacing [PluginContextImpl]'s direct repository injection with capability
+ *     wrappers that consult [PluginDataAccess.hasPermission] on every call.
+ */
 class PluginManagerImpl : PluginManager, KoinComponent {
     private val experienceRepository: ExperienceRepository by inject()
     private val substanceRepository: SubstanceRepository by inject()
     private val preferencesRepository: PreferencesRepository by inject()
-    
+
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val json = Json { ignoreUnknownKeys = true }
-    
+
     private val _installedPlugins = MutableStateFlow<List<PluginInfo>>(emptyList())
     override val installedPlugins: StateFlow<List<PluginInfo>> = _installedPlugins.asStateFlow()
-    
+
     private val _enabledPlugins = MutableStateFlow<List<Plugin>>(emptyList())
     override val enabledPlugins: StateFlow<List<Plugin>> = _enabledPlugins.asStateFlow()
-    
+
     private val loadedPlugins = mutableMapOf<String, Plugin>()
     private val pluginClassLoaders = mutableMapOf<String, URLClassLoader>()
-    
+
     init {
         scope.launch {
-            loadInstalledPlugins()
+            discoverInstalledPlugins()
         }
     }
-    
-    private suspend fun loadInstalledPlugins() {
+
+    /**
+     * Enumerates JARs in the plugin directory and reports them as [PluginInfo],
+     * but does NOT load any code. Until the sandbox in the kdoc above exists, the
+     * "previously enabled" preference is treated as a hint, not a license to execute.
+     */
+    private suspend fun discoverInstalledPlugins() {
         val pluginDir = File(getPluginDirectory())
         if (!pluginDir.exists()) {
             pluginDir.mkdirs()
+            tightenDirectoryPermissions(pluginDir)
             return
         }
-        
+        // Re-apply on every startup in case the directory was created earlier
+        // with looser perms.
+        tightenDirectoryPermissions(pluginDir)
+
         val pluginInfos = mutableListOf<PluginInfo>()
-        
+
         pluginDir.listFiles { file -> file.extension == "jar" }?.forEach { jarFile ->
             try {
                 val manifest = readPluginManifest(jarFile)
@@ -55,13 +96,11 @@ class PluginManagerImpl : PluginManager, KoinComponent {
                 val pluginInfo = PluginInfo(
                     manifest = manifest,
                     isEnabled = isEnabled,
-                    isLoaded = loadedPlugins.containsKey(manifest.id)
+                    // Always false at startup: code is never executed without an
+                    // explicit user gesture this session.
+                    isLoaded = false
                 )
                 pluginInfos.add(pluginInfo)
-                
-                if (isEnabled) {
-                    loadPlugin(jarFile.absolutePath)
-                }
             } catch (e: Exception) {
                 val errorInfo = PluginInfo(
                     manifest = PluginManifest(
@@ -86,29 +125,70 @@ class PluginManagerImpl : PluginManager, KoinComponent {
     
     override suspend fun loadPlugin(pluginPath: String): Result<Plugin> {
         return try {
-            val jarFile = File(pluginPath)
+            val jarFile = resolvePluginPath(pluginPath)
+                ?: return Result.failure(SecurityException(
+                    "Refusing to load plugin from outside ${getPluginDirectory()}"
+                ))
             val manifest = readPluginManifest(jarFile)
-            
+            validatePluginManifest(manifest)
+            requireNonPrivilegedManifest(manifest)
+
             if (loadedPlugins.containsKey(manifest.id)) {
                 return Result.failure(Exception("Plugin already loaded: ${manifest.id}"))
             }
-            
+
             val classLoader = URLClassLoader(arrayOf(jarFile.toURI().toURL()))
             val pluginClass = classLoader.loadClass(manifest.entryPoint)
             val plugin = pluginClass.getDeclaredConstructor().newInstance() as Plugin
-            
+
             val context = PluginContextImpl()
             plugin.initialize(context).getOrThrow()
-            
+
             loadedPlugins[manifest.id] = plugin
             pluginClassLoaders[manifest.id] = classLoader
-            
+
             updateEnabledPlugins()
             updatePluginInfo(manifest.id, isLoaded = true)
-            
+
             Result.success(plugin)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    /**
+     * Canonicalises [pluginPath] and returns the [File] only if it sits under
+     * [getPluginDirectory]. Symlinks pointing outside the dir are rejected because
+     * we compare canonical paths.
+     */
+    private fun resolvePluginPath(pluginPath: String): File? {
+        val pluginDir = File(getPluginDirectory()).canonicalFile
+        val candidate = File(pluginPath).canonicalFile
+        if (!candidate.exists() || !candidate.isFile) return null
+        if (candidate.extension != "jar") return null
+        var parent: File? = candidate.parentFile
+        while (parent != null) {
+            if (parent == pluginDir) return candidate
+            parent = parent.parentFile
+        }
+        return null
+    }
+
+    /**
+     * Rejects manifests asking for capabilities the runtime cannot enforce yet.
+     * Built-in plugins should declare only the minimal set they actually use.
+     */
+    private fun requireNonPrivilegedManifest(manifest: PluginManifest) {
+        val unsupported = manifest.permissions.filter {
+            it == Permission.NETWORK_ACCESS ||
+                it == Permission.FILE_SYSTEM_ACCESS ||
+                it == Permission.BIOMETRIC_DATA
+        }
+        if (unsupported.isNotEmpty()) {
+            throw SecurityException(
+                "Plugin ${manifest.id} requests permissions that are not yet enforced " +
+                    "by a sandbox: $unsupported. Loading is blocked until enforcement lands."
+            )
         }
     }
     
@@ -134,17 +214,20 @@ class PluginManagerImpl : PluginManager, KoinComponent {
     
     override suspend fun enablePlugin(pluginId: String): Result<Unit> {
         return try {
-            setPluginEnabled(pluginId, true)
-            
-            val pluginInfo = _installedPlugins.value.find { it.manifest.id == pluginId }
-                ?: return Result.failure(Exception("Plugin not found: $pluginId"))
-            
-            if (!loadedPlugins.containsKey(pluginId)) {
-                val pluginPath = File(getPluginDirectory(), "$pluginId.jar").absolutePath
+            val safeId = sanitizePluginId(pluginId)
+            val pluginInfo = _installedPlugins.value.find { it.manifest.id == safeId }
+                ?: return Result.failure(Exception("Plugin not found: $safeId"))
+
+            if (!loadedPlugins.containsKey(safeId)) {
+                // Resolve via the safe loader, never trust a constructed string path.
+                val pluginPath = File(getPluginDirectory(), "$safeId.jar").absolutePath
                 loadPlugin(pluginPath).getOrThrow()
             }
-            
-            updatePluginInfo(pluginId, isEnabled = true)
+
+            // Persist the enabled bit only after a successful load. Auto-load on
+            // next startup is intentionally not honoured (see class kdoc).
+            setPluginEnabled(safeId, true)
+            updatePluginInfo(safeId, isEnabled = true)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -162,50 +245,61 @@ class PluginManagerImpl : PluginManager, KoinComponent {
         }
     }
     
-    override suspend fun installPlugin(pluginPackage: ByteArray): Result<Plugin> {
+    override suspend fun installPlugin(pluginPackage: ByteArray): Result<PluginInfo> {
+        var tempFile: File? = null
         return try {
-            // Create temporary file to read manifest
-            val tempFile = File.createTempFile("plugin", ".jar")
-            tempFile.writeBytes(pluginPackage)
-            
+            if (pluginPackage.size > MAX_PLUGIN_BYTES) {
+                return Result.failure(SecurityException(
+                    "Plugin exceeds size limit ($MAX_PLUGIN_BYTES bytes)"
+                ))
+            }
+
+            tempFile = File.createTempFile("plugin", ".jar").apply {
+                deleteOnExit()
+                writeBytes(pluginPackage)
+            }
+
             val manifest = readPluginManifest(tempFile)
             validatePluginManifest(manifest)
-            
-            // Copy to plugin directory
+            requireNonPrivilegedManifest(manifest)
+
+            // manifest.id is now sanitised so this filename cannot escape the plugin dir.
             val pluginFile = File(getPluginDirectory(), "${manifest.id}.jar")
             tempFile.copyTo(pluginFile, overwrite = true)
-            tempFile.delete()
-            
-            // Add to installed plugins
+
             val pluginInfo = PluginInfo(
                 manifest = manifest,
                 isEnabled = false,
                 isLoaded = false
             )
-            
-            _installedPlugins.value = _installedPlugins.value + pluginInfo
-            
-            // Load if auto-enable is set
-            val plugin = loadPlugin(pluginFile.absolutePath).getOrThrow()
-            Result.success(plugin)
+
+            _installedPlugins.value = _installedPlugins.value
+                .filterNot { it.manifest.id == manifest.id } + pluginInfo
+
+            // Deliberately not auto-loading. Caller must invoke enablePlugin().
+            Result.success(pluginInfo)
         } catch (e: Exception) {
             Result.failure(e)
+        } finally {
+            tempFile?.delete()
         }
     }
     
     override suspend fun uninstallPlugin(pluginId: String): Result<Unit> {
         return try {
-            disablePlugin(pluginId)
-            
-            val pluginFile = File(getPluginDirectory(), "$pluginId.jar")
-            if (pluginFile.exists()) {
+            val safeId = sanitizePluginId(pluginId)
+            disablePlugin(safeId)
+
+            val pluginDir = File(getPluginDirectory()).canonicalFile
+            val pluginFile = File(pluginDir, "$safeId.jar").canonicalFile
+            if (pluginFile.parentFile == pluginDir && pluginFile.exists()) {
                 pluginFile.delete()
             }
-            
-            _installedPlugins.value = _installedPlugins.value.filter { 
-                it.manifest.id != pluginId 
+
+            _installedPlugins.value = _installedPlugins.value.filter {
+                it.manifest.id != safeId
             }
-            
+
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -258,7 +352,23 @@ class PluginManagerImpl : PluginManager, KoinComponent {
         require(manifest.name.isNotBlank()) { "Plugin name cannot be blank" }
         require(manifest.version.isNotBlank()) { "Plugin version cannot be blank" }
         require(manifest.entryPoint.isNotBlank()) { "Plugin entry point cannot be blank" }
+        // id becomes "$id.jar" in the plugin directory — refuse anything that could
+        // navigate out of it or pollute the filesystem.
+        require(manifest.id == sanitizePluginId(manifest.id)) {
+            "Plugin ID contains illegal characters: '${manifest.id}'"
+        }
+        require(manifest.id.length <= 128) { "Plugin ID too long" }
+        // entryPoint is fed to ClassLoader.loadClass, so it must look like a JVM
+        // class name — letters, digits, underscores, dots, dollar signs. This
+        // does not stop a malicious plugin; it stops typos becoming weird crashes.
+        require(manifest.entryPoint.all { it.isLetterOrDigit() || it == '.' || it == '_' || it == '$' }) {
+            "Plugin entry point is not a valid class name"
+        }
     }
+
+    private fun sanitizePluginId(id: String): String =
+        id.filter { it.isLetterOrDigit() || it == '.' || it == '_' || it == '-' }
+            .take(128)
     
     private suspend fun isPluginEnabled(pluginId: String): Boolean {
         return preferencesRepository.getBoolean("plugin_enabled_$pluginId", false)
@@ -289,7 +399,33 @@ class PluginManagerImpl : PluginManager, KoinComponent {
         val userHome = System.getProperty("user.home")
         return "$userHome/.psychonautwiki-journal/plugins"
     }
+
+    /**
+     * Best-effort tightening to 0700 on POSIX, owner-only on Windows.
+     * Kept silent on failure (FAT mounts, etc) — matches AppModule behaviour.
+     */
+    private fun tightenDirectoryPermissions(dir: File) {
+        try {
+            val path = dir.toPath()
+            if (path.fileSystem.supportedFileAttributeViews().contains("posix")) {
+                Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rwx------"))
+            } else {
+                dir.setReadable(false, false); dir.setReadable(true, true)
+                dir.setWritable(false, false); dir.setWritable(true, true)
+                dir.setExecutable(false, false); dir.setExecutable(true, true)
+            }
+        } catch (_: Exception) {
+            // Non-fatal.
+        }
+    }
     
+    companion object {
+        // 32 MB ceiling on a single plugin JAR. Plain harm-reduction analytics
+        // plugins should be a small fraction of this; the cap exists to bound
+        // memory use in [installPlugin] before any parsing happens.
+        private const val MAX_PLUGIN_BYTES = 32L * 1024 * 1024
+    }
+
     private inner class PluginContextImpl : PluginContext {
         override val experienceRepository = this@PluginManagerImpl.experienceRepository
         override val substanceRepository = this@PluginManagerImpl.substanceRepository

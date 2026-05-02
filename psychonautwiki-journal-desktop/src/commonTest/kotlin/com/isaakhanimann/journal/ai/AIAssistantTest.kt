@@ -1,11 +1,20 @@
 package com.isaakhanimann.journal.ai
 
+import com.isaakhanimann.journal.data.secrets.SecretStorage
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.string.shouldNotBeBlank
+
+private class InMemorySecretStorage : SecretStorage {
+    private val map = mutableMapOf<String, String>()
+    override val isHardwareBacked: Boolean = false
+    override suspend fun getSecret(key: String): String? = map[key]
+    override suspend fun setSecret(key: String, value: String) { map[key] = value }
+    override suspend fun removeSecret(key: String) { map.remove(key) }
+}
 
 class AIAssistantTest : StringSpec({
     
@@ -97,14 +106,27 @@ class AIAssistantTest : StringSpec({
     }
     
     "OpenAIProvider should have extended capabilities" {
-        val provider = OpenAIProvider()
-        
+        val provider = OpenAIProvider(InMemorySecretStorage())
+
         provider.name shouldBe "OpenAI GPT"
         provider.description.shouldNotBeBlank()
         provider.capabilities.supportedLanguages.shouldNotBeEmpty()
         provider.capabilities.supportedLanguages shouldContain "en"
         provider.capabilities.supportedLanguages shouldContain "es"
         provider.capabilities.supportedLanguages shouldContain "fr"
+    }
+
+    "OpenAIProvider should reject api key passed via config map" {
+        val storage = InMemorySecretStorage()
+        val provider = OpenAIProvider(storage)
+        val result = provider.initialize(mapOf("apiKey" to "sk-leak"))
+        result.isFailure shouldBe true
+    }
+
+    "OpenAIProvider should refuse to initialize without a stored secret" {
+        val provider = OpenAIProvider(InMemorySecretStorage())
+        val result = provider.initialize(emptyMap())
+        result.isFailure shouldBe true
     }
     
     "AIQuery should contain all necessary fields" {

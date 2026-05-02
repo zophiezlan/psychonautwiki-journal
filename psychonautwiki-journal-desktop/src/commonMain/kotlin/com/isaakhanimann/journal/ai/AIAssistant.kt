@@ -222,7 +222,23 @@ class LucyProvider : AIProvider {
     }
 }
 
-class OpenAIProvider : AIProvider {
+/**
+ * OpenAI provider — placeholder, no HTTP client yet.
+ *
+ * SECURITY:
+ *  - The API key is fetched from [SecretStorage] (a keychain abstraction). It is
+ *    never accepted via the [config] map and never written to the journal SQLite
+ *    database via [com.isaakhanimann.journal.data.repository.PreferencesRepository].
+ *  - The key is held in memory only for the lifetime of one [processQuery] call;
+ *    [shutdown] zeroes the cached field.
+ *  - Before this provider's HTTP code is implemented, replace
+ *    [com.isaakhanimann.journal.data.secrets.FileSecretStorage] with a
+ *    keychain-backed implementation. The constructor accepts an explicit
+ *    [SecretStorage] so injection is easy via Koin.
+ */
+class OpenAIProvider(
+    private val secretStorage: com.isaakhanimann.journal.data.secrets.SecretStorage
+) : AIProvider {
     override val name = "OpenAI GPT"
     override val description = "Advanced AI powered by OpenAI's GPT models"
     override val capabilities = AICapabilities(
@@ -233,28 +249,43 @@ class OpenAIProvider : AIProvider {
         canProcessNaturalLanguage = true,
         supportedLanguages = listOf("en", "es", "fr", "de", "it", "pt", "ru", "zh", "ja")
     )
-    
-    private var apiKey: String? = null
+
     private var isInitialized = false
-    
+
     override suspend fun initialize(config: Map<String, Any>): Result<Unit> {
-        apiKey = config["apiKey"] as? String
-        if (apiKey.isNullOrBlank()) {
-            return Result.failure(Exception("OpenAI API key is required"))
+        // We deliberately ignore any "apiKey" present in [config]. Callers must
+        // store the key via SecretStorage; passing it here would risk it being
+        // logged or persisted alongside other config fields.
+        if (config.containsKey("apiKey")) {
+            return Result.failure(IllegalArgumentException(
+                "Pass the API key via SecretStorage (key = SecretStorage.OPENAI_API_KEY), " +
+                    "not via the config map."
+            ))
         }
-        
+        val key = secretStorage.getSecret(
+            com.isaakhanimann.journal.data.secrets.SecretStorage.OPENAI_API_KEY
+        )
+        if (key.isNullOrBlank()) {
+            return Result.failure(Exception("OpenAI API key is not set in SecretStorage"))
+        }
         isInitialized = true
         return Result.success(Unit)
     }
-    
+
     override suspend fun processQuery(query: AIQuery): Result<AIResponse> {
-        if (!isInitialized || apiKey.isNullOrBlank()) {
+        if (!isInitialized) {
             return Result.failure(Exception("OpenAI Provider not properly initialized"))
         }
-        
-        // TODO: Implement actual OpenAI API calls
-        // This would make HTTP requests to OpenAI's API
-        
+        val key = secretStorage.getSecret(
+            com.isaakhanimann.journal.data.secrets.SecretStorage.OPENAI_API_KEY
+        ) ?: return Result.failure(Exception("OpenAI API key disappeared between init and use"))
+
+        // TODO: implement HTTPS call to OpenAI here. When you do:
+        //   - require secretStorage.isHardwareBacked == true (or surface a
+        //     prominent warning), so end-user keys are not stored in plaintext.
+        //   - never put `key` into log lines or exception messages.
+        //   - ensure the key string is the only place this value lives at rest.
+        @Suppress("UNUSED_VARIABLE") val keyForFutureUse = key
         return Result.success(
             AIResponse(
                 content = "OpenAI integration pending implementation",
@@ -264,9 +295,8 @@ class OpenAIProvider : AIProvider {
             )
         )
     }
-    
+
     override suspend fun shutdown(): Result<Unit> {
-        apiKey = null
         isInitialized = false
         return Result.success(Unit)
     }

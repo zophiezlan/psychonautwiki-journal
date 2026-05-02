@@ -201,7 +201,13 @@ interface PluginManager {
     suspend fun unloadPlugin(pluginId: String): Result<Unit>
     suspend fun enablePlugin(pluginId: String): Result<Unit>
     suspend fun disablePlugin(pluginId: String): Result<Unit>
-    suspend fun installPlugin(pluginPackage: ByteArray): Result<Plugin>
+    /**
+     * Persists [pluginPackage] in the plugin directory and registers it as installed.
+     * Does NOT load or execute plugin code — the caller must invoke [enablePlugin]
+     * afterwards as a separate explicit gesture so installing and running are
+     * distinct authorisations.
+     */
+    suspend fun installPlugin(pluginPackage: ByteArray): Result<PluginInfo>
     suspend fun uninstallPlugin(pluginId: String): Result<Unit>
     
     fun getPluginCapabilities(type: KClass<out PluginCapability>): List<PluginCapability>
