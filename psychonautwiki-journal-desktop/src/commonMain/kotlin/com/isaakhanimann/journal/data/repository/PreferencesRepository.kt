@@ -73,7 +73,7 @@ class PreferencesRepositoryImpl(
     }
     
     override suspend fun setPreference(key: String, value: String) {
-        queries.insertOrReplacePreference(key = key, value_ = value)
+        queries.insertOrReplacePreference(key = key, value = value)
     }
     
     override suspend fun deletePreference(key: String) {

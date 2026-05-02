@@ -33,3 +33,10 @@
 -keepclasseswithmembers class * {
     kotlinx.serialization.KSerializer serializer(...);
 }
+
+# SLF4J's API probes these binder classes at runtime. They are optional and
+# absent when no concrete logging backend is bundled, so ProGuard should not
+# fail the release build on them.
+-dontwarn org.slf4j.impl.StaticLoggerBinder
+-dontwarn org.slf4j.impl.StaticMDCBinder
+-dontwarn org.slf4j.impl.StaticMarkerBinder

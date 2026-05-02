@@ -14,44 +14,29 @@
 | Linux    | A PGP key for signing the `.deb` and the `SHA256SUMS` file. |
 | All      | A clean checkout on a tag (`git checkout vX.Y.Z`) — never release from a dirty working tree. |
 
-## 1. Build
+## 1. Build & sign per platform
 
-```bash
-cd psychonautwiki-journal-desktop
+Each platform has its own quirks (signing tool, notarization service, hardware
+token requirements). Treat the per-platform docs as the source of truth:
 
-# macOS — sign + notarize
-APPLE_DEVELOPER_ID="Developer ID Application: <Org Name> (<TEAMID>)" \
-APPLE_ID="release@your.org" \
-APPLE_TEAM_ID="<TEAMID>" \
-APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx" \
-gradle packageReleaseDmg
+| Platform | Doc | Output |
+|----------|-----|--------|
+| Windows  | [`docs/release/RELEASE-WINDOWS.md`](docs/release/RELEASE-WINDOWS.md) | signed `.msi` |
+| macOS    | [`docs/release/RELEASE-MACOS.md`](docs/release/RELEASE-MACOS.md) | signed + notarized + stapled `.dmg` |
+| Linux    | [`docs/release/RELEASE-LINUX.md`](docs/release/RELEASE-LINUX.md) | signed `.deb`, signed `.AppImage` |
 
-# Linux — produces an unsigned .deb / AppImage; sign in step 2.
-gradle packageReleaseDeb packageReleaseAppImage
+Each platform-specific doc walks through:
 
-# Windows — produces an unsigned .msi; sign in step 2.
-gradle packageReleaseMsi
-```
+1. Building the unsigned artefact (`gradle packageRelease<Format>`).
+2. Smoke-testing **before** signing, so reputation isn't burned on a broken
+   build.
+3. Applying the platform's signature with proper timestamping.
+4. Verifying the signature with the platform's verification tool
+   (`spctl`, `signtool verify /pa`, `dpkg-sig --verify`).
 
-The Compose Multiplatform plugin reads the env vars above (see `build.gradle.kts`)
-and skips signing when they're absent. Verify after each build:
-
-```bash
-codesign -dv --verbose=4 build/compose/binaries/main-release/dmg/*.dmg
-spctl -a -t open --context context:primary-signature -v build/compose/binaries/main-release/dmg/*.dmg
-```
-
-## 2. Sign Windows / Linux artefacts
-
-```bash
-# Windows — Authenticode via signtool from the Windows SDK
-signtool sign /f "$WIN_SIGN_PFX_PATH" /p "$WIN_SIGN_PFX_PASSWORD" \
-  /tr http://timestamp.digicert.com /td sha256 /fd sha256 \
-  build/compose/binaries/main-release/msi/PsychonautWikiJournal-*.msi
-
-# Linux — sign the .deb with dpkg-sig
-dpkg-sig --sign builder build/compose/binaries/main-release/deb/*.deb
-```
+The Compose Multiplatform plugin reads `APPLE_*` env vars (see
+`build.gradle.kts`) for macOS and skips signing when they're absent;
+Windows and Linux signing currently happen as a separate post-build step.
 
 ## 3. Generate checksums
 
@@ -86,10 +71,12 @@ suspect and pull it.
 
 - [ ] Tag matches version in `build.gradle.kts` (`packageVersion`)
 - [ ] `flake.lock` committed
-- [ ] All four platforms built from the SAME commit
-- [ ] macOS: `spctl` accepts the .dmg
-- [ ] Windows: `signtool verify /pa /v *.msi` succeeds
-- [ ] Linux: `dpkg-sig --verify *.deb` succeeds
-- [ ] `SHA256SUMS` and `SHA256SUMS.asc` published
+- [ ] All platforms built from the SAME commit (verify with `git rev-parse HEAD` on each build host)
+- [ ] macOS: `spctl -a -t open --context context:primary-signature -v *.dmg` accepts AND `xcrun stapler validate *.dmg` succeeds ([`docs/release/RELEASE-MACOS.md`](docs/release/RELEASE-MACOS.md) § 5)
+- [ ] Windows: `signtool verify /pa /v *.msi` reports zero errors AND a timestamp ([`docs/release/RELEASE-WINDOWS.md`](docs/release/RELEASE-WINDOWS.md) § 4)
+- [ ] Linux: `dpkg-sig --verify *.deb` AND `appimagetool --validate *.AppImage` both succeed ([`docs/release/RELEASE-LINUX.md`](docs/release/RELEASE-LINUX.md) § 5)
+- [ ] `SHA256SUMS` covers EVERY released artefact (signed copies, not the unsigned intermediates)
+- [ ] `SHA256SUMS.asc` is a detached PGP signature of `SHA256SUMS`
 - [ ] Release notes link to the verification commands
-- [ ] No build env var (APPLE_*, WIN_SIGN_*) leaked into CI logs
+- [ ] No build env var (`APPLE_*`, `WIN_SIGN_*`) appears in CI logs — search the run output before publishing
+- [ ] PFX / signing materials wiped from any CI runner that touched them (use `if: always()` cleanup steps)
