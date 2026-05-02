@@ -1,0 +1,284 @@
+-- Schema for the journal database. Reconstructed from the repository call sites
+-- (commit a generated artefact only via this file; do NOT hand-edit the
+-- generated Kotlin in build/).
+--
+-- All Instant-valued columns are stored as INTEGER (epoch seconds) to match
+-- the Kotlin layer's Instant.fromEpochSeconds() / .epochSeconds usage.
+-- Boolean-valued columns are stored as INTEGER (0 / 1).
+
+CREATE TABLE Experience (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    text TEXT NOT NULL,
+    creationDate INTEGER NOT NULL,
+    sortDate INTEGER NOT NULL,
+    isFavorite INTEGER NOT NULL DEFAULT 0,
+    location TEXT,
+    overallRating INTEGER
+);
+
+CREATE INDEX experience_sortDate ON Experience(sortDate);
+CREATE INDEX experience_isFavorite ON Experience(isFavorite);
+
+CREATE TABLE Ingestion (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    substanceName TEXT NOT NULL,
+    time INTEGER NOT NULL,
+    endTime INTEGER,
+    creationDate INTEGER,
+    administrationRoute TEXT NOT NULL,
+    dose REAL,
+    isDoseAnEstimate INTEGER NOT NULL DEFAULT 0,
+    estimatedDoseStandardDeviation REAL,
+    units TEXT,
+    experienceId INTEGER NOT NULL,
+    notes TEXT,
+    stomachFullness TEXT,
+    consumerName TEXT,
+    customUnitId INTEGER,
+    FOREIGN KEY(experienceId) REFERENCES Experience(id) ON DELETE CASCADE
+);
+
+CREATE INDEX ingestion_experienceId ON Ingestion(experienceId);
+CREATE INDEX ingestion_time ON Ingestion(time);
+
+CREATE TABLE ShulginRating (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    time INTEGER,
+    creationDate INTEGER,
+    option TEXT NOT NULL,
+    experienceId INTEGER NOT NULL,
+    FOREIGN KEY(experienceId) REFERENCES Experience(id) ON DELETE CASCADE
+);
+
+CREATE INDEX shulginRating_experienceId ON ShulginRating(experienceId);
+
+CREATE TABLE TimedNote (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    creationDate INTEGER NOT NULL,
+    time INTEGER NOT NULL,
+    note TEXT NOT NULL,
+    color TEXT NOT NULL,
+    experienceId INTEGER NOT NULL,
+    isPartOfTimeline INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY(experienceId) REFERENCES Experience(id) ON DELETE CASCADE
+);
+
+CREATE INDEX timedNote_experienceId ON TimedNote(experienceId);
+
+CREATE TABLE UserPreference (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    value TEXT NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+);
+
+CREATE TABLE SubstanceCompanion (
+    substanceName TEXT NOT NULL PRIMARY KEY,
+    color TEXT NOT NULL
+);
+
+CREATE TABLE CustomSubstance (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    units TEXT NOT NULL,
+    description TEXT NOT NULL
+);
+
+CREATE TABLE CustomUnit (
+    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    substanceName TEXT NOT NULL,
+    name TEXT NOT NULL,
+    creationDate INTEGER NOT NULL,
+    administrationRoute TEXT NOT NULL,
+    dose REAL,
+    estimatedDoseStandardDeviation REAL,
+    isEstimate INTEGER NOT NULL DEFAULT 0,
+    isArchived INTEGER NOT NULL DEFAULT 0,
+    unit TEXT NOT NULL,
+    unitPlural TEXT,
+    originalUnit TEXT NOT NULL,
+    note TEXT NOT NULL
+);
+
+CREATE INDEX customUnit_substanceName ON CustomUnit(substanceName);
+
+-- Shared helpers ------------------------------------------------------------
+
+lastInsertRowId:
+SELECT last_insert_rowid();
+
+-- Experience queries --------------------------------------------------------
+
+selectAllExperiences:
+SELECT * FROM Experience ORDER BY sortDate DESC;
+
+selectExperienceById:
+SELECT * FROM Experience WHERE id = ?;
+
+selectFavoriteExperiences:
+SELECT * FROM Experience WHERE isFavorite = 1 ORDER BY sortDate DESC;
+
+-- ESCAPE clause lets the caller escape SQLite's LIKE wildcards (% and _)
+-- with backslash, so a search for "100%" doesn't match every row. The
+-- ExperienceRepository wraps user input through escapeLikePattern() before
+-- adding the surrounding %s.
+searchExperiences:
+SELECT * FROM Experience
+WHERE title LIKE ? ESCAPE '\' OR text LIKE ? ESCAPE '\'
+ORDER BY sortDate DESC;
+
+insertExperience:
+INSERT INTO Experience(title, text, creationDate, sortDate, isFavorite, location, overallRating)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+updateExperience:
+UPDATE Experience SET title = ?, text = ?, isFavorite = ?, location = ?, overallRating = ? WHERE id = ?;
+
+deleteExperience:
+DELETE FROM Experience WHERE id = ?;
+
+-- Ingestion queries ---------------------------------------------------------
+
+selectAllIngestions:
+SELECT * FROM Ingestion ORDER BY time DESC;
+
+selectIngestionsByExperience:
+SELECT * FROM Ingestion WHERE experienceId = ? ORDER BY time ASC;
+
+insertIngestion:
+INSERT INTO Ingestion(
+    substanceName, time, endTime, creationDate, administrationRoute,
+    dose, isDoseAnEstimate, estimatedDoseStandardDeviation, units,
+    experienceId, notes, stomachFullness, consumerName, customUnitId
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateIngestion:
+UPDATE Ingestion SET
+    substanceName = ?, time = ?, endTime = ?, administrationRoute = ?,
+    dose = ?, isDoseAnEstimate = ?, estimatedDoseStandardDeviation = ?,
+    units = ?, notes = ?, stomachFullness = ?, consumerName = ?, customUnitId = ?
+WHERE id = ?;
+
+deleteIngestion:
+DELETE FROM Ingestion WHERE id = ?;
+
+-- ShulginRating queries -----------------------------------------------------
+
+selectShulginRatingsByExperience:
+SELECT * FROM ShulginRating WHERE experienceId = ? ORDER BY time ASC;
+
+insertShulginRating:
+INSERT INTO ShulginRating(time, creationDate, option, experienceId)
+VALUES (?, ?, ?, ?);
+
+updateShulginRating:
+UPDATE ShulginRating SET time = ?, option = ? WHERE id = ?;
+
+deleteShulginRating:
+DELETE FROM ShulginRating WHERE id = ?;
+
+-- TimedNote queries ---------------------------------------------------------
+
+selectTimedNotesByExperience:
+SELECT * FROM TimedNote WHERE experienceId = ? ORDER BY time ASC;
+
+selectTimelineNotesByExperience:
+SELECT * FROM TimedNote WHERE experienceId = ? AND isPartOfTimeline = 1 ORDER BY time ASC;
+
+insertTimedNote:
+INSERT INTO TimedNote(creationDate, time, note, color, experienceId, isPartOfTimeline)
+VALUES (?, ?, ?, ?, ?, ?);
+
+updateTimedNote:
+UPDATE TimedNote SET time = ?, note = ?, color = ?, isPartOfTimeline = ? WHERE id = ?;
+
+deleteTimedNote:
+DELETE FROM TimedNote WHERE id = ?;
+
+-- UserPreference queries ----------------------------------------------------
+-- Note: SQLDelight will rename the generated `value` column accessor to
+-- `value_` because `value` is a Kotlin soft-keyword that confuses property
+-- access. The repository code already uses `pref.value_`.
+
+selectAllPreferences:
+SELECT * FROM UserPreference;
+
+selectPreferenceByKey:
+SELECT * FROM UserPreference WHERE key = ?;
+
+-- INSERT OR REPLACE preserves the original created_at via COALESCE so the
+-- timestamp reflects when the key was first written, not the latest write.
+-- :key is referenced twice in the same statement, which SQLDelight supports
+-- and exposes as a single named parameter.
+insertOrReplacePreference:
+INSERT OR REPLACE INTO UserPreference(key, value, created_at, updated_at)
+VALUES (
+    :key,
+    :value,
+    COALESCE((SELECT created_at FROM UserPreference WHERE key = :key), strftime('%s', 'now')),
+    strftime('%s', 'now')
+);
+
+deletePreference:
+DELETE FROM UserPreference WHERE key = ?;
+
+-- SubstanceCompanion queries ------------------------------------------------
+
+selectAllSubstanceCompanions:
+SELECT * FROM SubstanceCompanion;
+
+selectSubstanceCompanionByName:
+SELECT * FROM SubstanceCompanion WHERE substanceName = ?;
+
+insertOrReplaceSubstanceCompanion:
+INSERT OR REPLACE INTO SubstanceCompanion(substanceName, color) VALUES (?, ?);
+
+deleteSubstanceCompanion:
+DELETE FROM SubstanceCompanion WHERE substanceName = ?;
+
+-- CustomSubstance queries ---------------------------------------------------
+
+selectAllCustomSubstances:
+SELECT * FROM CustomSubstance ORDER BY name ASC;
+
+selectCustomSubstanceById:
+SELECT * FROM CustomSubstance WHERE id = ?;
+
+insertCustomSubstance:
+INSERT INTO CustomSubstance(name, units, description) VALUES (?, ?, ?);
+
+updateCustomSubstance:
+UPDATE CustomSubstance SET name = ?, units = ?, description = ? WHERE id = ?;
+
+deleteCustomSubstance:
+DELETE FROM CustomSubstance WHERE id = ?;
+
+-- CustomUnit queries --------------------------------------------------------
+
+selectCustomUnitsBySubstance:
+SELECT * FROM CustomUnit WHERE substanceName = ? AND isArchived = 0 ORDER BY name ASC;
+
+selectAllCustomUnits:
+SELECT * FROM CustomUnit ORDER BY substanceName, name;
+
+selectCustomUnitById:
+SELECT * FROM CustomUnit WHERE id = ?;
+
+insertCustomUnit:
+INSERT INTO CustomUnit(
+    substanceName, name, creationDate, administrationRoute, dose,
+    estimatedDoseStandardDeviation, isEstimate, isArchived, unit,
+    unitPlural, originalUnit, note
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateCustomUnit:
+UPDATE CustomUnit SET
+    name = ?, administrationRoute = ?, dose = ?,
+    estimatedDoseStandardDeviation = ?, isEstimate = ?, isArchived = ?,
+    unit = ?, unitPlural = ?, originalUnit = ?, note = ?
+WHERE id = ?;
+
+deleteCustomUnit:
+DELETE FROM CustomUnit WHERE id = ?;

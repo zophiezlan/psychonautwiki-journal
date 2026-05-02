@@ -22,8 +22,8 @@ local.properties
 /reports/
 /test-results/
 
-# SQLDelight generated code
-/src/commonMain/sqldelight/
+# SQLDelight generated schema snapshots
+/src/commonMain/sqldelight/databases/
 
 # Compose resources
 /src/commonMain/composeResources/generated/
