@@ -346,7 +346,15 @@ class ExperienceRepositoryImpl(
     }
     
     override fun searchExperiences(query: String): Flow<List<Experience>> {
-        return queries.searchExperiences("%$query%", "%$query%")
+        // Escape SQLite LIKE wildcards (%, _) and the escape character itself
+        // before wrapping with surrounding %s, so a search for "100%" finds
+        // literal "100%" rather than every row. See ESCAPE clause on the SQL.
+        val escaped = query
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        val pattern = "%$escaped%"
+        return queries.searchExperiences(pattern, pattern)
             .asFlow()
             .mapToList(Dispatchers.IO)
             .map { experienceList ->

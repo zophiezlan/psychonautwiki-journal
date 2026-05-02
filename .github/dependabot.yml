@@ -1,0 +1,42 @@
+version: 2
+updates:
+  # Keep GitHub Actions pinned-by-SHA up to date. Dependabot will rewrite the
+  # pinned SHA and update the trailing version comment in lockstep.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      gh-actions:
+        patterns:
+          - "*"
+
+  # Gradle dependencies. The Compose / Kotlin / Coroutines / Compose Compiler
+  # ecosystem releases tend to need to move together; group them so the
+  # maintainer doesn't get five PRs that each break compilation alone.
+  - package-ecosystem: "gradle"
+    directory: "/psychonautwiki-journal-desktop"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      kotlin-stack:
+        patterns:
+          - "org.jetbrains.kotlin*"
+          - "org.jetbrains.kotlinx*"
+      compose-stack:
+        patterns:
+          - "org.jetbrains.compose*"
+          - "androidx.compose*"
+      koin:
+        patterns:
+          - "io.insert-koin*"
+      sqldelight:
+        patterns:
+          - "app.cash.sqldelight*"
+      test-stack:
+        patterns:
+          - "io.kotest*"
+          - "io.mockk*"
+          - "io.cucumber*"

@@ -416,21 +416,21 @@ class AIAssistantImpl : AIAssistant, KoinComponent {
     }
     
     private fun buildExperienceAnalysisPrompt(experiences: List<Experience>): String {
+        val rendered = experiences.mapIndexed { index, exp ->
+            """
+            Experience ${index + 1}:
+            - Date: ${exp.date}
+            - Substances: ${exp.ingestions?.joinToString(", ") { "${it.substanceName} (${it.dose})" } ?: "None listed"}
+            - Setting: ${exp.location ?: "Not specified"}
+            - Overall Rating: ${exp.overallRating ?: "Not rated"}
+            - Notes: ${exp.text}
+            """.trimIndent()
+        }.joinToString("\n\n")
         return """
             Please analyze the following experiences and provide insights:
-            
-            ${experiences.mapIndexed { index, exp ->
-                """
-                Experience ${index + 1}:
-                - Date: ${exp.date}
-                - Substances: ${exp.ingestions?.joinToString(", ") { "${it.substanceName} (${it.dose})" } ?: "None listed"}
-                - Setting: ${exp.location ?: "Not specified"}
-                - Overall Rating: ${exp.overallRating ?: "Not rated"}
-                - Notes: ${exp.text}
-                """.trimIndent()
-            }.joinToString("\n\n")}
-            }.joinToString("\n\n")}
-            
+
+            $rendered
+
             Please provide:
             1. Patterns you notice across these experiences
             2. Safety considerations or concerns
